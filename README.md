@@ -29,7 +29,7 @@ python -m aps_update collect --from 2026-05-01 --through 2026-05-31
 
 If May and June have no meeting, still collect those months. The July report then includes May, June, and July.
 
-Snapshots are stored in `data/collections/`. They contain site traffic and the text of public social posts, and no API keys.
+Snapshots are stored in `data/collections/`. They contain site traffic and the text of public social posts, and no API keys. `data/` and `reports/` stay on this machine and are listed in `.gitignore`.
 
 ## 2. Report
 
@@ -48,6 +48,8 @@ The file has four sections: Website, Socials, and an empty Field Trips section f
 
 Requests, page views, data transfer, posts, reactions, comments, impressions, shares, and clicks are added across the snapshots in the report.
 
+Requests for the Hope Johnson book, Now There Was a Lady!, are listed for every collection. They are added when every collection has that count.
+
 These are not added:
 
 - **Events and pages** are the calendar and the site at the end of the latest snapshot.
@@ -58,5 +60,5 @@ These are not added:
 
 - Website changes come from `CHANGELOG.md` in the public site repo.
 - Events are calendar entries. Pages are the site's own pages, including each Fossil Friday, and do not count those calendar entries again.
-- Traffic comes from Cloudflare: requests, page views, data transfer, unique client addresses, countries, and top pages.
+- Traffic comes from Cloudflare: requests, page views, data transfer, unique client addresses, countries, top pages, and requests for the Hope Johnson book.
 - Social numbers come from Buffer, per channel: posts, reactions, comments, and whichever of impressions, reach, shares, clicks, and engagement rate that channel provides. Follower totals are not available. Figures can lag the networks by about a day.

@@ -27,6 +27,8 @@ Collecting does not move the comparison date.
 
 Show the user the file it writes. Do not change a figure, date, or comparison. `## Field Trips` stays empty.
 
+The Hope Johnson book, Now There Was a Lady!, always has its request count. Each collection is listed, and the total is compared with the previous delivered report when that count exists. The report does not list individual posts.
+
 Run `report --finalize` only after the user says this is the update delivered at the meeting. That is the date the next comparison starts from. A draft does not move it.
 
 ## How to read the numbers

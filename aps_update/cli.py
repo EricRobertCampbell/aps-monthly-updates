@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timedelta
 
-from aps_update.aggregate import build_report, comparison_totals, select_collections
+from aps_update.aggregate import build_report, comparison_totals, previous_with_book, select_collections
 from aps_update.collect import collect_windows
 from aps_update.config import REPORTS_DIR, load_config
 from aps_update.ranges import Window, default_window, format_window, parse_date, today_in
@@ -77,7 +77,7 @@ def _report(config, finalize: bool) -> None:
     report = build_report(selected, str(config.timezone), datetime.now(config.timezone))
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     path = REPORTS_DIR / f"{report['id']}.md"
-    path.write_text(render(report, finalized))
+    path.write_text(render(report, previous_with_book(finalized, collections)))
     print(f"wrote {path.relative_to(config.root)}")
     if finalize:
         payload = comparison_totals(report)

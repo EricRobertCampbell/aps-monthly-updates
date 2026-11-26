@@ -1,12 +1,15 @@
 import unittest
 from datetime import date, datetime
 
-from aps_update.aggregate import build_report, select_collections
+from aps_update.aggregate import book_summary, build_report, comparison_totals, previous_with_book, select_collections
 from aps_update.ranges import Window, default_window, split_for_storage
 from aps_update.render import render
 
 
-def collection(start, end, *, requests, uniques, posts, socials=True):
+BOOK = "/openSourcePublications/Now There Was a Lady.pdf"
+
+
+def collection(start, end, *, requests, uniques, posts, socials=True, pages=None):
     return {
         "id": f"{start}_{end}",
         "start": start,
@@ -28,7 +31,7 @@ def collection(start, end, *, requests, uniques, posts, socials=True):
             "bytes": requests * 1000,
             "uniques": uniques,
             "countries": [{"name": "Canada", "requests": requests}],
-            "top_pages": [{"path": "/", "requests": requests // 2}],
+            "top_pages": [{"path": "/", "requests": requests // 2}] if pages is None else pages,
             "top_pages_note": None,
         },
         "socials": {
@@ -107,6 +110,94 @@ class ReportTests(unittest.TestCase):
         self.assertIn("change 2026-05-01", text)
         self.assertIn("not added together", text)
         self.assertIn("No earlier report has been finalized", text)
+        self.assertNotIn("Posts with the most reactions", text)
+        self.assertNotIn("Post from 2026-07-01", text)
+
+    def test_book_route_is_listed_for_every_period_and_compared(self):
+        may = collection(
+            "2026-05-01",
+            "2026-06-01",
+            requests=100,
+            uniques=40,
+            posts=2,
+            pages=[{"path": BOOK, "requests": 10}],
+        )
+        june = collection(
+            "2026-06-01",
+            "2026-07-01",
+            requests=200,
+            uniques=50,
+            posts=3,
+            pages=[{"path": "/openSourcePublications/Now%20There%20Was%20a%20Lady.pdf", "requests": 4}],
+        )
+        report = build_report([may, june], "America/Edmonton", datetime(2026, 7, 1, 12, 0))
+        self.assertEqual(report["traffic"]["book"]["requests"], 14)
+        self.assertEqual(comparison_totals(report)["traffic"]["book"]["requests"], 14)
+
+        text = render(
+            report,
+            {
+                "start": "2026-04-01",
+                "end": "2026-05-01",
+                "traffic": {"book": {"requests": 8, "periods": [{"label": "1 Apr – 30 Apr 2026", "requests": 8}]}},
+            },
+        )
+        self.assertIn("#### Now There Was a Lady!", text)
+        self.assertIn("`/openSourcePublications/Now There Was a Lady.pdf`", text)
+        self.assertIn("| 1–31 May 2026 | 10 |", text)
+        self.assertIn("| 1–30 Jun 2026 | 4 |", text)
+        self.assertIn("| This period | 14 |", text)
+        self.assertIn("| Previous period | 8 |", text)
+        self.assertIn("| Change | +6 (+75%) |", text)
+
+    def test_saved_route_count_overrides_the_top_pages_sample(self):
+        item = collection(
+            "2026-05-01",
+            "2026-06-01",
+            requests=100,
+            uniques=40,
+            posts=1,
+            pages=[{"path": BOOK, "requests": 99}],
+        )
+        item["traffic"]["routes"] = [{"path": BOOK, "requests": 3, "note": None}]
+        report = build_report([item], "America/Edmonton", datetime(2026, 6, 1, 12, 0))
+        self.assertEqual(report["traffic"]["book"]["requests"], 3)
+        text = render(report, None)
+        self.assertIn("| 1–31 May 2026 | 3 |", text)
+        self.assertNotIn("This period", text.split("Now There Was a Lady!")[1].split("## Socials")[0])
+
+    def test_missing_book_count_is_not_treated_as_zero(self):
+        may = collection(
+            "2026-05-01",
+            "2026-06-01",
+            requests=100,
+            uniques=40,
+            posts=1,
+            pages=[{"path": BOOK, "requests": 10}],
+        )
+        june = collection("2026-06-01", "2026-07-01", requests=200, uniques=50, posts=1)
+        report = build_report([may, june], "America/Edmonton", datetime(2026, 7, 1, 12, 0))
+        self.assertIsNone(report["traffic"]["book"]["requests"])
+        text = render(report, None)
+        self.assertIn("| 1–30 Jun 2026 | unavailable |", text)
+        self.assertIn("| This period | unavailable |", text)
+        self.assertIn("outside the saved top pages", text)
+
+    def test_previous_report_can_recover_the_book_from_its_collections(self):
+        may = collection(
+            "2026-05-01",
+            "2026-06-01",
+            requests=100,
+            uniques=40,
+            posts=1,
+            pages=[{"path": BOOK, "requests": 10}],
+        )
+        previous = previous_with_book(
+            {"collections": [may["id"]], "traffic": {"requests": 100}},
+            [may],
+        )
+        self.assertEqual(previous["traffic"]["book"]["requests"], 10)
+        self.assertEqual(book_summary([may])["periods"][0]["requests"], 10)
 
 
 if __name__ == "__main__":

@@ -138,6 +138,9 @@ def _traffic(traffic: dict, previous: dict | None) -> list[str]:
         )
         if len(traffic["uniques_by_collection"]) > 1:
             lines.append("Each collection keeps its busiest pages, and this list adds those.")
+    book = traffic.get("book")
+    if book:
+        lines.extend(_book(book, previous))
     if traffic["countries"]:
         lines.extend(["", "#### Countries", ""])
         lines.append(
@@ -195,24 +198,41 @@ def _socials(channels: list[dict], previous: dict | None) -> list[str]:
                     _table(["Collection", "Reach"], [[item["label"], _integer(item["value"])] for item in reach_rows]),
                 ]
             )
-        if channel["posts"]:
-            lines.extend(["", "#### Posts with the most reactions", ""])
-            for post in channel["posts"]:
-                text = post["text"] or "(no text)"
-                if len(text) > 180:
-                    text = text[:177].rstrip() + "..."
-                when = format_day(date.fromisoformat(post["sent_on"])) if post.get("sent_on") else "Undated"
-                detail = (
-                    f"{when}: {text} — {_integer(post['reactions'])} {_noun(post['reactions'], 'reaction')}, "
-                    f"{_integer(post['comments'])} {_noun(post['comments'], 'comment')}"
-                )
-                if post.get("url"):
-                    lines.append(f"- [{detail}]({post['url']})")
-                else:
-                    lines.append(f"- {detail}")
     if not lines:
         return ["No social metrics in this period."]
     return lines
+
+
+def _book(book: dict, previous: dict | None) -> list[str]:
+    rows = [[period["label"], _optional_count(period["requests"])] for period in book["periods"]]
+    if len(book["periods"]) > 1:
+        rows.append(["This period", _optional_count(book["requests"])])
+    if previous is not None:
+        prior = ((previous.get("traffic") or {}).get("book") or {})
+        prior_requests = prior.get("requests")
+        rows.append(["Previous period", _optional_count(prior_requests)])
+        if book["requests"] is not None and prior_requests is not None:
+            rows.append(["Change", _delta(book["requests"], prior_requests, _integer)])
+        else:
+            rows.append(["Change", "—"])
+    lines = [
+        "",
+        f"#### {book['label']}",
+        "",
+        f"Requests for the Hope Johnson book, `{_page(book['path'])}`.",
+        "",
+        _table(["Period", "Requests"], rows),
+    ]
+    notes = [f"{period['label']}: {period['note']}" for period in book["periods"] if period.get("note")]
+    if notes:
+        lines.extend(["", *notes])
+    return lines
+
+
+def _optional_count(value: float | None) -> str:
+    if value is None:
+        return "unavailable"
+    return _integer(value)
 
 
 def _count_row(label: str, current: float, previous: float | None, *, compared: bool) -> list[str]:
@@ -284,10 +304,6 @@ def _bytes(value: float) -> str:
     if value >= 1_000_000:
         return f"{value / 1_000_000:.1f} MB"
     return f"{value / 1_000:.1f} KB"
-
-
-def _noun(value: float, word: str) -> str:
-    return word if int(round(value)) == 1 else f"{word}s"
 
 
 def _page(path: str) -> str:

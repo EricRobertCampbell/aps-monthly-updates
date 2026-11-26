@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import date, datetime
 
+from aps_update.cloudflare import BOOK_ROUTE, is_book_route
 from aps_update.ranges import Window, format_window
 
 _COUNT_METRICS = (
@@ -25,6 +26,7 @@ def build_report(collections: list[dict], timezone_name: str, generated_at: date
     window = Window(date.fromisoformat(start), date.fromisoformat(end))
     gaps = _gaps(collections)
     traffic = _traffic(collections)
+    traffic["book"] = book_summary(collections)
     socials = _socials(collections)
     inventory = _inventory(collections)
     releases: list[dict] = []
@@ -134,6 +136,56 @@ def _traffic(collections: list[dict]) -> dict:
     }
 
 
+def book_summary(collections: list[dict]) -> dict:
+    periods = []
+    for collection in collections:
+        requests, note = _book_count(collection)
+        periods.append(
+            {
+                "id": collection["id"],
+                "label": format_window(_window(collection)),
+                "requests": requests,
+                "note": note,
+            }
+        )
+    known = [period["requests"] for period in periods]
+    total = sum(known) if known and all(value is not None for value in known) else None
+    return {
+        "path": BOOK_ROUTE,
+        "label": "Now There Was a Lady!",
+        "requests": total,
+        "periods": periods,
+    }
+
+
+def previous_with_book(previous: dict | None, collections: list[dict]) -> dict | None:
+    """Fill the Hope Johnson comparison from saved collections when an older report lacks it."""
+    if not previous:
+        return None
+    traffic = dict(previous.get("traffic") or {})
+    if traffic.get("book"):
+        return previous
+    by_id = {item["id"]: item for item in collections}
+    prior = [by_id[item_id] for item_id in previous.get("collections") or [] if item_id in by_id]
+    if not prior:
+        return previous
+    traffic["book"] = book_summary(prior)
+    return {**previous, "traffic": traffic}
+
+
+def _book_count(collection: dict) -> tuple[int | None, str | None]:
+    traffic = collection.get("traffic") or {}
+    for route in traffic.get("routes") or []:
+        if is_book_route(route.get("path") or ""):
+            return route.get("requests"), route.get("note")
+    for page in traffic.get("top_pages") or []:
+        if is_book_route(page.get("path") or ""):
+            return page.get("requests"), traffic.get("top_pages_note")
+    if "top_pages" in traffic:
+        return None, "This route was outside the saved top pages for this collection."
+    return None, "This route was not collected."
+
+
 def _socials(collections: list[dict]) -> list[dict]:
     grouped: dict[str, dict] = {}
     unavailable: list[dict] = []
@@ -152,7 +204,6 @@ def _socials(collections: list[dict]) -> list[dict]:
                     "metrics": {},
                     "reach_by_collection": [],
                     "rate_parts": [],
-                    "posts": [],
                     "missing": [],
                 },
             )
@@ -171,8 +222,6 @@ def _socials(collections: list[dict]) -> list[dict]:
                     key, {"name": metric["name"], "unit": metric["unit"], "value": 0}
                 )
                 bucket["value"] += metric["value"]
-            for post in channel["posts"]:
-                current["posts"].append({**post, "collection": label})
     if not grouped:
         return [
             {
@@ -181,7 +230,6 @@ def _socials(collections: list[dict]) -> list[dict]:
                 "metrics": {},
                 "reach_by_collection": [],
                 "engagement_rate": None,
-                "posts": [],
                 "missing": unavailable,
             }
         ]
@@ -196,8 +244,6 @@ def _socials(collections: list[dict]) -> list[dict]:
                 "unit": "count",
                 "value": channel["reach_by_collection"][0]["value"],
             }
-        channel["posts"].sort(key=lambda post: post["reactions"], reverse=True)
-        channel["posts"] = channel["posts"][:3]
         channels.append(channel)
     channels.sort(key=lambda channel: channel["service"] or "")
     return channels
@@ -237,6 +283,7 @@ def comparison_totals(report: dict) -> dict:
             "page_views": report["traffic"]["page_views"],
             "bytes": report["traffic"]["bytes"],
             "uniques": report["traffic"]["uniques"],
+            "book": report["traffic"].get("book"),
         },
         "socials": socials,
     }

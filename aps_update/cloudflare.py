@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 from datetime import date
 
 from aps_update.config import Config
@@ -9,6 +9,7 @@ from aps_update.http_json import post_json
 from aps_update.ranges import Window, covers_retention, slice_days, utc_stamp
 
 _ENDPOINT = "https://api.cloudflare.com/client/v4/graphql"
+BOOK_ROUTE = "/openSourcePublications/Now There Was a Lady.pdf"
 _STATIC_SUFFIXES = (
     ".css",
     ".js",
@@ -120,6 +121,10 @@ def fetch_traffic(config: Config, window: Window, today: date) -> dict:
         top_pages, top_pages_note = _top_pages(config, window, today)
     except RuntimeError as exc:
         top_pages, top_pages_note = [], str(exc)
+    try:
+        book_requests, book_note = _book_requests(config, window, today)
+    except RuntimeError as exc:
+        book_requests, book_note = None, str(exc)
     return {
         "requests": totals["sum"]["requests"],
         "page_views": totals["sum"]["pageViews"],
@@ -131,6 +136,7 @@ def fetch_traffic(config: Config, window: Window, today: date) -> dict:
         "countries": countries,
         "top_pages": top_pages,
         "top_pages_note": top_pages_note,
+        "routes": [{"path": BOOK_ROUTE, "requests": book_requests, "note": book_note}],
     }
 
 
@@ -184,6 +190,62 @@ def _top_pages(config: Config, window: Window, today: date) -> tuple[list[dict],
     if skipped:
         return pages, "Top pages cover only the part of this window still in Cloudflare's 31-day path history."
     return pages, None
+
+
+def _book_requests(config: Config, window: Window, today: date) -> tuple[int | None, str | None]:
+    """Count the Hope Johnson book even when it is outside the top paths."""
+    total = 0
+    covered = 0
+    skipped = 0
+    encoded = quote(BOOK_ROUTE, safe="/")
+    for chunk in slice_days(window, 30):
+        if not covers_retention(chunk, today, 31):
+            skipped += chunk.days
+            continue
+        covered += chunk.days
+        groups = _graphql(
+            config,
+            """
+            query Book($zoneTag: String!, $start: Time!, $end: Time!, $path: String!) {
+              viewer {
+                zones(filter: { zoneTag: $zoneTag }) {
+                  httpRequestsAdaptiveGroups(
+                    limit: 5
+                    orderBy: [count_DESC]
+                    filter: {
+                      datetime_geq: $start
+                      datetime_lt: $end
+                      requestSource: "eyeball"
+                      clientRequestPath: $path
+                    }
+                  ) {
+                    count
+                  }
+                }
+              }
+            }
+            """,
+            {
+                "zoneTag": config.cloudflare_zone_id,
+                "start": utc_stamp(chunk.start, config.timezone),
+                "end": utc_stamp(chunk.end, config.timezone),
+                "path": encoded,
+            },
+        )["httpRequestsAdaptiveGroups"]
+        total += sum(row["count"] for row in groups)
+    if covered == 0:
+        return None, (
+            "Requests for this route were no longer in Cloudflare's 31-day path history when this was collected."
+        )
+    if skipped:
+        return total, (
+            "Requests for this route cover only the part of this window still in Cloudflare's 31-day path history."
+        )
+    return total, None
+
+
+def is_book_route(path: str) -> bool:
+    return _canonical(path) == BOOK_ROUTE
 
 
 _PROBE_ROOTS = (
